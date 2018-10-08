@@ -1,3 +1,8 @@
 <resources>
     <string name="app_name">BikeView</string>
+    <string name="left">Left</string>
+    <string name="right">Right</string>
+    <string name="redLight">Red Light</string>
+    <string name="breakLight">Auto Brake Light</string>
+    <string name="nightLight">Auto Night Light</string>
 </resources>
