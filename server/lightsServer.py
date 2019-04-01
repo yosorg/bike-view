@@ -1,8 +1,13 @@
+#!/usr/bin/python
 from neopixel import *
 import time
-import socket
+#import socket
+#from thread import start_new_thread
+import subprocess
+import shlex
+import threading
 import select
-
+from socket import socket, AF_INET, SOCK_DGRAM, SOL_SOCKET, SO_BROADCAST, gethostbyname, gethostname
 # LED strip configuration:
 LED_COUNT      = 8       # Number of LED pixels.
 LED_PIN        = 18      # GPIO pin connected to the pixels (must support PWM!).
@@ -15,7 +20,7 @@ LED_CHANNEL    = 0
 #LED_STRIP      = ws.SK6812W_STRIP
 LED_STRIP      = ws.WS2811_STRIP_GRB
 
-LED_2_COUNT      = 8      # Number of LED pixels.
+LED_2_COUNT      = 16      # Number of LED pixels.
 LED_2_PIN        = 13      # GPIO pin connected to the pixels (must support PWM! GPIO 13 or 18 on RPi 3).
 LED_2_FREQ_HZ    = 800000  # LED signal frequency in hertz (usually 800khz)
 LED_2_DMA        = 11      # DMA channel to use for generating signal (Between 1 and 14)
@@ -32,6 +37,8 @@ RED	      	   = Color(255, 0, 0)
 RED2	       = Color(255, 0, 0, 50)
 BREAK_COLOR    = Color(190, 10, 48)
 BREAK_COLOR2   = Color(187, 10, 48, 25)
+
+#connected = False
 
 def allRed(strip):
 	for i in range(strip.numPixels()):
@@ -51,10 +58,10 @@ def turnLeft(strip, strip2, color, turnTime=0.1):
 		strip.setPixelColor((strip.numPixels()//2)-i, color)
 		strip.show()
 		time.sleep(turnTime/(strip.numPixels()//4))
-	for i in range(strip2.numPixels()):
-		strip2.setPixelColor(i, color)
+	for i in range(strip2.numPixels()/2):
+		strip2.setPixelColor(i+strip2.numPixels()/2, color)
 		strip2.show()
-		time.sleep(turnTime/(strip2.numPixels()))
+		time.sleep(turnTime/(strip2.numPixels()//4))
 	time.sleep(0.3)
 	allBlank(strip)
 	allBlank(strip2)
@@ -69,6 +76,10 @@ def turnRight(strip, strip2, color, turnTime=0.2):
 		strip.setPixelColor((strip.numPixels()//2)+i, color)
 		strip.show()
 		time.sleep(turnTime/(strip.numPixels()//4))
+	for i in range(strip2.numPixels()/2):
+		strip2.setPixelColor(i, color)
+		strip2.show()
+		time.sleep(turnTime/(strip2.numPixels()//4))
 	time.sleep(0.3)
 	allBlank(strip)
 	allBlank(strip2)
@@ -88,6 +99,31 @@ def brakeLight(strip, strip2, color):
 	allBlank(strip)
 	allBlank(strip2)
 
+def setBright(strip, strip2, brightest):
+	if 0 <= brightest <= 100:
+		bright = brightest*255//100
+		strip.setBrightness(bright)
+		strip2.setBrightness(bright)
+		strip.show()
+		strip2.show()
+
+def broadcast():
+	puerto = 5555
+	message = "BikeView"
+	sock = socket(AF_INET, SOCK_DGRAM)
+	sock.bind(('', 0))
+	sock.setsockopt(SOL_SOCKET, SO_BROADCAST, 1)
+	while not connected:
+		print("broadcasting")
+		sock.sendto(message.encode(), ('<broadcast>', puerto))
+		time.sleep(3)
+
+def getip():
+	testIP = "8.8.8.8"
+	s = socket(AF_INET, SOCK_DGRAM)
+	s.connect((testIP, 0))
+	return s.getsockname()[0]
+
 if __name__ == '__main__':
 	# Create NeoPixel object with appropriate configuration.
 	ledRing = Adafruit_NeoPixel(LED_COUNT, LED_PIN, LED_FREQ_HZ, LED_DMA, LED_INVERT, LED_BRIGHTNESS, LED_CHANNEL, LED_STRIP)
@@ -95,16 +131,22 @@ if __name__ == '__main__':
 	# Intialize the library (must be called once before other functions).
 	ledRing.begin()
 	sideStrips.begin()
-	host = "192.168.43.251"
-	port = 80
+	#global connected
+	connected = False
+	trasmiting = False
+	host = getip()
+	port = 8000
 	received = ''
-	mySocket = socket.socket()
+	mySocket = socket()
 	mySocket.setblocking(False)
 	mySocket.bind((host,port))
 	mySocket.listen(10)
 	inputs = [mySocket]
 	print('running server...')
 	while True:
+		bthread = threading.Thread(target=broadcast, args=())
+		bthread.daemon = True
+		bthread.start()
 		ready, [], [] = select.select(inputs, [], [])
 		for s in ready:
 			if s is mySocket:
@@ -112,19 +154,20 @@ if __name__ == '__main__':
 				conn.setblocking(False)
 				inputs.append(conn)
 				print ("Connection from: " + str(addr))
+				connected = True
 			else:
 				while True:
 					readyq = select.select([conn], [], [], 0)
 					#[],[],excep = select.select([], [], [conn], 0)
 					if readyq[0]:
 						received = conn.recv(1024).decode()
-						conn.send(received.encode())
-					print(received)
+						conn.send(received+"\n".encode())
+						print(received)
 					if received == 'r' or received == 'ro' or received == 'or': # Turn right lights
 						turnRight(ledRing, sideStrips, TURN_COLOR)
 					elif received == 'l' or received == 'lo' or received == 'ol': # Turn left lights
 						turnLeft(ledRing, sideStrips, TURN_COLOR)
-					elif received == 'n': # Night lights
+					elif received == 'n' or received == 'on' or received == 'n3' or received == 'n2' or received == 'n1': # Night lights
 						allRed(ledRing)
 						allRed(sideStrips)
 					elif received == 'b': # Brake lights
@@ -139,10 +182,36 @@ if __name__ == '__main__':
 					elif received == 'o': # Lights off
 						allBlank(ledRing)
 						allBlank(sideStrips)
+					elif received == 'v': # Video trasmiting
+						if not trasmiting:
+							trasmiting = True
+							raspivid = "raspivid -t 0 -w 1280 -h 720 -fps 30 -b 3000000 -n -pf baseline -o -"
+							socat = "socat -b 1024 - UDP4-DATAGRAM:"
+							port = ":5000"
+							args1 = shlex.split(raspivid)
+							args2 = shlex.split(socat+str(addr[0])+port)
+							#print(args2)
+							p1 = subprocess.Popen(args1, stdout=subprocess.PIPE)
+							p2 = subprocess.Popen(args2,  stdin=p1.stdout)
+							p1.stdout.close()  # Allow p1 to receive a SIGPIPE if p2 exits
+					elif received == 'vs' or received == 'vs1':
+						if trasmiting:
+							trasmiting = False
+							p2.terminate()
+							p1.terminate()
+					elif received == 'c':
+						time.sleep(0.01)
+					elif received.isdigit():
+						setBright(ledRing, sideStrips, int(received))
 					else:
 						print(received)
 						print('Connection close')
-						conn.shutdown(1)
+						if trasmiting:
+							trasmiting = False
+							p2.terminate()
+							p1.terminate()
+						connected = False
+						#conn.shutdown(1)
 						conn.close()
 						inputs.remove(s)
 						break
