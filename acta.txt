@@ -1,0 +1,8 @@
+28/3
+reparar problemas conexión
+reparar problemas video
+convertir clase request a fragment
+dispositivos conectados como objetos
+version del servidor para pc
+4 layouts de video
+
