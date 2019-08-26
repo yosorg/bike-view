@@ -7,6 +7,7 @@ import android.widget.Switch
 import kotlinx.android.synthetic.main.activity_main.view.*
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import java.io.BufferedReader
 import java.io.IOException
@@ -17,40 +18,35 @@ import kotlin.concurrent.thread
 
 
 class Request {
-    var ips: MutableList<String> = mutableListOf()
     var socks: MutableList<Socket> = mutableListOf()
     //var broacast = true
+    lateinit var rsocket: DatagramSocket
 
+    fun start(broacast: Boolean): String {
 
-    fun start(broacast: Boolean) {
-        var recvBuf = ByteArray(15000)
-        var rsocket = DatagramSocket(5555)
-        val packet = DatagramPacket(recvBuf, recvBuf.size)
-        Log.e("INIT", "Broadcast $broacast")
         while (broacast){
+            var recvBuf = ByteArray(15000)
+            rsocket = DatagramSocket(5555)
+            val packet = DatagramPacket(recvBuf, recvBuf.size)
+            Log.e("INIT", "Broadcast $broacast")
             rsocket.receive(packet)
             val ipreceived = packet.address.hostAddress
             val message = String(packet.data).trim { it <= ' ' }
             Log.e("INIT", "Got UDP broadcast from $ipreceived, message: $message")
             //rsocket.close()
             if (message == "BikeView") {
-                var gotip = false
-                ips.forEach {
-                    gotip = gotip || (ipreceived == it)
-                }
-                Log.e("INIT", "Number of ip ${ips.size}")
-                if (!gotip){
-                    ips.add(ipreceived)
-                }
+                return ipreceived
             }
-            if (ips.size == 2) break
+            //if (ips.size == 2) break
         }
+        Log.e("INIT", "Stop")
         rsocket.close()
+        return ""
     }
 
-    fun connect(): MutableList<Socket>{
+    fun connect(ips: MutableList<String>): MutableList<Socket>{
         Log.e("CONN", "Number of ip ${ips.size}")
-        if (ips.size == 0) GlobalScope.async { start(true) }
+        //if (ips.size == 0) GlobalScope.async { start(true) }
         ips.forEach {
             Log.e("CONN", "ip ${it}")
             socks.add(Socket(it, 8000))
@@ -96,13 +92,6 @@ class Request {
 
     }
 
-    fun getips(): MutableList<String>{
-        return ips
-    }
-
-    fun setips(ipss: MutableList<String>){
-        ips = ipss
-    }
     fun setbroad(broad: Boolean){
         //broacast = broad
     }
@@ -111,5 +100,7 @@ class Request {
         //socket.outputStream.write("s".toByteArray(Charset.defaultCharset()))
         socket.close()
     }
-
+    fun rstop(){
+        //rsocket.close()
+    }
 }

@@ -32,9 +32,10 @@ import android.os.Build
 import android.widget.ImageButton
 import android.widget.SeekBar
 import java.net.Socket
+import kotlin.concurrent.thread
 
 
-class MainActivity : AppCompatActivity(), SensorEventListener, SurfaceHolder.Callback, TextureView.SurfaceTextureListener {
+class MainActivity : AppCompatActivity(), SensorEventListener, TextureView.SurfaceTextureListener {
 
 
     private lateinit var sensorManager: SensorManager
@@ -43,20 +44,30 @@ class MainActivity : AppCompatActivity(), SensorEventListener, SurfaceHolder.Cal
     var connection:Boolean by Delegates.observable(false) { property, oldValue, newValue ->
         //onPrepareOptionsMenu(menu)
         if(oldValue != newValue){
-            if(connection) connButton.setImageResource(R.drawable.ic_wifi)
-            else connButton.setImageResource(R.drawable.ic_wifi_slash)
+            if(connection) {
+                if(orientation == Configuration.ORIENTATION_PORTRAIT) connButton.setImageResource(R.drawable.ic_wifi_small)
+                else connButton.setImageResource(R.drawable.ic_wifi)
+            }
+            else {
+                if(orientation == Configuration.ORIENTATION_PORTRAIT) connButton.setImageResource(R.drawable.ic_wifi_slash_small)
+                else connButton.setImageResource(R.drawable.ic_wifi_slash)
+            }
         }
     }
-    private var ips: MutableList<String> = mutableListOf()
+    var ipList: MutableList<String>  = mutableListOf()
+    var sockList: MutableList<Socket> = mutableListOf()
     val requester = Request()
-    var sock = GlobalScope.async {requester.connect()}
+    var sock = GlobalScope.async {sockList}
+//    val deviceListener = thread(start = true) {requester.start(true)}
     var transmtting = false
     val TRAMS_STATE = "transmisionState"
     var REQU_STATE = "requesterState"
+    var redchecked = false
+    var nighthecked = false
+    var brakechecked = false
+    var orientation by Delegates.notNull<Int>()
 
-
-
-    private var mRec: UdpReceiverDecoderThread? = null
+    private var vrec: VideoReceiver? = null
     override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {
         // Do something here if sensor accuracy changes.
     }
@@ -64,8 +75,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener, SurfaceHolder.Cal
     override fun onSensorChanged(event: SensorEvent) {
         if(event.sensor.type == Sensor.TYPE_LIGHT){
             light = event.values[0].toInt()
-            if (nightButton.isChecked) {
-                redButton.isChecked = light < 400
+            if (orientation == Configuration.ORIENTATION_PORTRAIT) {
+                if (nightButton.isChecked) {
+                    redButton.isChecked = light < 400
+                }
+            } else {
+                if (nighthecked) {
+                    if (light < 400) redButtonSmall.performClick()
+                }
             }
         }
     }
@@ -74,13 +91,21 @@ class MainActivity : AppCompatActivity(), SensorEventListener, SurfaceHolder.Cal
         super.onCreate(savedInstanceState)
         transmtting = savedInstanceState?.getBoolean(TRAMS_STATE) ?: false
         setContentView(R.layout.activity_main)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         //GlobalScope.async {requester.start(true)}
         //requester.broacast = true
-        //sock = GlobalScope.async {requester.connect()}
+        GlobalScope.async {ipList.add(requester.start(true))}
+
+        if(!connection) {
+            sock = GlobalScope.async {requester.connect(ipList)}
+            GlobalScope.async {ipList.add(requester.start(true))}
+        }
+        GlobalScope.async {connection = requester.run(sock.await(), "c")}
+
         setSupportActionBar(toolbar)
         //val model = ViewModelProviders.of(this).get(Request::class.java)
 
-        val orientation = resources.configuration.orientation
+        orientation = resources.configuration.orientation
         if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
             window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_IMMERSIVE
                     or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
@@ -94,6 +119,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener, SurfaceHolder.Cal
                     or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN)
 
         }
+
         val sv = videoSurface
         //sv.holder.addCallback(this)
         //sv.surfaceTextureListener
@@ -107,81 +133,198 @@ class MainActivity : AppCompatActivity(), SensorEventListener, SurfaceHolder.Cal
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         lightSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT)
 
+        if(!connection) {
+            sock = GlobalScope.async {requester.connect(ipList)}
+            GlobalScope.async {ipList.add(requester.start(true))}
+        }
+        GlobalScope.async {connection = requester.run(sock.await(), "c")}
+        GlobalScope.async {connection = requester.run(sock.await(), "c")}
         if (transmtting) {
             GlobalScope.async { connection = requester.run(sock.await(), "v")}
+            cameraButton.visibility = View.GONE
+            sv.visibility = View.VISIBLE
         }
 
         GlobalScope.async {connection = requester.run(sock.await(), "c")}
 
-        leftButton.setOnCheckedChangeListener { buttonView, isChecked->
-            if (isChecked) {
-                GlobalScope.async {connection = requester.run(sock.await(), "l" )}
+
+        if (orientation == Configuration.ORIENTATION_PORTRAIT) {
+            leftButton.setOnCheckedChangeListener { buttonView, isChecked->
                 if (connection) {
-                    leftButton.setBackgroundColor(ContextCompat.getColor(this, android.R.color.holo_orange_light))
-                    leftButton.startAnimation(anim)
+                    if (isChecked) {
+                        GlobalScope.async {connection = requester.run(sock.await(), "l" )}
+                        leftButton.setBackgroundColor(ContextCompat.getColor(this, android.R.color.holo_orange_light))
+                        leftButton.startAnimation(anim)
+                        rightButton.isChecked = false
+                    } else {
+                        if ((!rightButton.isChecked)&&redButton.isChecked) GlobalScope.async {connection = requester.run(sock.await(), "n" )}
+                        if (!rightButton.isChecked) GlobalScope.async {connection = requester.run(sock.await(), "o" )}
+                        leftButton.clearAnimation()
+                        leftButton.setBackgroundColor(ContextCompat.getColor(this, R.color.buttonColor))
+                    }
                 }
-                rightButton.isChecked = false
-            } else {
-                if ((!rightButton.isChecked)&&redButton.isChecked) GlobalScope.async {connection = requester.run(sock.await(), "n" )}
-                if (!rightButton.isChecked) GlobalScope.async {connection = requester.run(sock.await(), "o" )}
-                leftButton.clearAnimation()
-                leftButton.setBackgroundColor(ContextCompat.getColor(this, android.R.color.transparent))
             }
-        }
 
-        rightButton.setOnCheckedChangeListener { buttonView, isChecked ->
-            if (isChecked) {
-                GlobalScope.async {connection = requester.run(sock.await(), "r" )}
+            rightButton.setOnCheckedChangeListener { buttonView, isChecked ->
                 if (connection) {
-                    rightButton.setBackgroundColor(ContextCompat.getColor(this, android.R.color.holo_orange_light))
-                    rightButton.startAnimation(anim)
+                    if (isChecked) {
+                        GlobalScope.async {connection = requester.run(sock.await(), "r" )}
+                        rightButton.setBackgroundColor(ContextCompat.getColor(this, android.R.color.holo_orange_light))
+                        rightButton.startAnimation(anim)
+                        leftButton.isChecked = false
+                    } else {
+                        if ((!leftButton.isChecked)&&redButton.isChecked) GlobalScope.async {connection = requester.run(sock.await(), "n" )}
+                        if (!leftButton.isChecked) GlobalScope.async {connection = requester.run(sock.await(), "o" )}
+                        rightButton.clearAnimation()
+                        rightButton.setBackgroundColor(ContextCompat.getColor(this, R.color.buttonColor))
+                    }
                 }
-                leftButton.isChecked = false
-            } else {
-                if ((!leftButton.isChecked)&&redButton.isChecked) GlobalScope.async {connection = requester.run(sock.await(), "n" )}
-                if (!leftButton.isChecked) GlobalScope.async {connection = requester.run(sock.await(), "o" )}
-                rightButton.clearAnimation()
-                rightButton.setBackgroundColor(ContextCompat.getColor(this, android.R.color.transparent))
             }
-        }
-
-        redButton.setOnCheckedChangeListener { buttonView, isChecked ->
-            GlobalScope.async {connection = requester.run(sock.await(),
-                    when {
-                        leftButton.isChecked -> "l"
-                        rightButton.isChecked -> "r"
-                        isChecked -> "n"
-                        else -> "o"
-                    })}
-            if (isChecked&&connection) {
-                redButton.setBackgroundColor(ContextCompat.getColor(this, android.R.color.holo_red_light))
-            } else {
-                redButton.setBackgroundColor(ContextCompat.getColor(this, android.R.color.background_light))
+            redButton.setOnCheckedChangeListener { buttonView, isChecked ->
+                if (connection) {
+                    redchecked=!redchecked
+                    GlobalScope.async {connection = requester.run(sock.await(),
+                            when {
+                                leftButton.isChecked -> "l"
+                                rightButton.isChecked -> "r"
+                                isChecked -> "n"
+                                else -> "o"
+                            })
+                    }
+                    if (isChecked) {
+                        redButton.setBackgroundColor(ContextCompat.getColor(this, android.R.color.holo_red_light))
+                    } else {
+                        redButton.setBackgroundColor(ContextCompat.getColor(this, R.color.buttonColor))
+                    }
+                }
             }
-        }
 
-        nightButton.setOnCheckedChangeListener { buttonView, isChecked ->
-            if (isChecked&&connection) {
-                nightButton.setBackgroundColor(ContextCompat.getColor(this, android.R.color.holo_red_light))
-            } else {
-                nightButton.setBackgroundColor(ContextCompat.getColor(this, android.R.color.background_light))
+            nightButton.setOnCheckedChangeListener { buttonView, isChecked ->
+
+                if (connection) {
+                    nighthecked=!nighthecked
+                    if (isChecked) {
+                        nightButton.setBackgroundColor(ContextCompat.getColor(this, android.R.color.holo_red_light))
+                    } else {
+                        nightButton.setBackgroundColor(ContextCompat.getColor(this, R.color.buttonColor))
+                    }
+                }
             }
-        }
 
-        brakeButton.setOnCheckedChangeListener { buttonView, isChecked ->
-            GlobalScope.async {connection = requester.run(sock.await(), if (isChecked) "b" else "o")}
+            brakeButton.setOnCheckedChangeListener { buttonView, isChecked ->
+                if (connection) {
+                    brakechecked=!brakechecked
+                    if (isChecked) {
+                        brakeButton.setBackgroundColor(ContextCompat.getColor(this, android.R.color.holo_red_light))
+                        GlobalScope.async {connection = requester.run(sock.await(), "b")}
+                    } else {
+                        brakeButton.setBackgroundColor(ContextCompat.getColor(this, R.color.buttonColor))
+                        GlobalScope.async {connection = requester.run(sock.await(),
+                                when{
+                                    leftButton.isChecked -> "l"
+                                    rightButton.isChecked -> "r"
+                                    nightButton.isChecked  -> "n"
+                                    else -> "o"
+                                })
+                        }
+                    }
+                }
+            }
+        } else {
+            leftButton.setOnCheckedChangeListener { buttonView, isChecked->
+                if (connection) {
+                    if (isChecked) {
+                        GlobalScope.async {connection = requester.run(sock.await(), "l" )}
+                        leftButton.setBackgroundColor(ContextCompat.getColor(this, android.R.color.holo_orange_light))
+                        leftButton.startAnimation(anim)
+                        rightButton.isChecked = false
+                    } else {
+                        if ((!rightButton.isChecked)&&redchecked) GlobalScope.async {connection = requester.run(sock.await(), "n" )}
+                        if (!rightButton.isChecked) GlobalScope.async {connection = requester.run(sock.await(), "o" )}
+                        leftButton.clearAnimation()
+                        leftButton.setBackgroundColor(ContextCompat.getColor(this, android.R.color.transparent))
+                    }
+                }
+            }
+
+            rightButton.setOnCheckedChangeListener { buttonView, isChecked ->
+                if (connection) {
+                    if (isChecked) {
+                        GlobalScope.async {connection = requester.run(sock.await(), "r" )}
+                        rightButton.setBackgroundColor(ContextCompat.getColor(this, android.R.color.holo_orange_light))
+                        rightButton.startAnimation(anim)
+                        leftButton.isChecked = false
+                    } else {
+                        if ((!leftButton.isChecked)&&redchecked) GlobalScope.async {connection = requester.run(sock.await(), "n" )}
+                        if (!leftButton.isChecked) GlobalScope.async {connection = requester.run(sock.await(), "o" )}
+                        rightButton.clearAnimation()
+                        rightButton.setBackgroundColor(ContextCompat.getColor(this, android.R.color.transparent))
+                    }
+                }
+            }
+            redButtonSmall.setOnClickListener {
+                if (connection) {
+                    redchecked=!redchecked
+                    GlobalScope.async {connection = requester.run(sock.await(),
+                            when {
+                                leftButton.isChecked -> "l"
+                                rightButton.isChecked -> "r"
+                                redchecked -> "n"
+                                else -> "o"
+                            })}
+                    if (redchecked) {
+                        redButtonSmall.setImageResource(R.drawable.ic_red_red)
+                    } else {
+                        redButtonSmall.setImageResource(R.drawable.ic_red)
+                    }
+                }
+            }
+
+            nightButtonSmall.setOnClickListener {
+                if (connection) {
+                    nighthecked=!nighthecked
+                    if (nighthecked) {
+                        nightButtonSmall.setImageResource(R.drawable.ic_night_red)
+                    } else {
+                        nightButtonSmall.setImageResource(R.drawable.ic_night)
+                    }
+                }
+            }
+
+            brakeButtonSmall.setOnClickListener {
+                if (connection) {
+                    brakechecked=!brakechecked
+                    if (brakechecked) {
+                        brakeButtonSmall.setImageResource(R.drawable.ic_brake_red)
+                        GlobalScope.async {connection = requester.run(sock.await(), "b")}
+                    } else {
+                        brakeButtonSmall.setImageResource(R.drawable.ic_brake)
+                        GlobalScope.async {connection = requester.run(sock.await(),
+                                when{
+                                    leftButton.isChecked -> "l"
+                                    rightButton.isChecked -> "r"
+                                    redchecked  -> "n"
+                                    else -> "o"
+                                })
+                        }
+                    }
+                }
+            }
         }
 
         connButton.setOnClickListener {
             if(!connection) {
-                sock = GlobalScope.async {requester.connect()}
+                sock = GlobalScope.async {requester.connect(ipList)}
+                GlobalScope.async {ipList.add(requester.start(true))}
             }
             GlobalScope.async {connection = requester.run(sock.await(), "c")}
         }
 
         brightButton.setOnClickListener {
-            brightButton.visibility = View.GONE
-            seekBar.visibility = View.VISIBLE
+            if (connection) {
+                brightButton.visibility = View.GONE
+                seekBar.visibility = View.VISIBLE
+            }
         }
 
         seekBar.setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
@@ -201,23 +344,52 @@ class MainActivity : AppCompatActivity(), SensorEventListener, SurfaceHolder.Cal
                             leftButton.isChecked -> "l"
                             rightButton.isChecked -> "r"
                             else -> progress.toString()
-                        })}
+                        })
+                }
             }
         })
 
         videoSurface.setOnClickListener {
-            if (!transmtting) {
-                GlobalScope.async { connection = requester.run(sock.await(), "v") }
-                transmtting = true
-            } else {
-                GlobalScope.async { connection = requester.run(sock.await(), "vs") }
-                transmtting = false
+            if(connection){
+                if (transmtting) {
+                    GlobalScope.async { connection = requester.run(sock.await(), "vs") }
+                    sv.visibility = View.GONE
+                    cameraButton.visibility = View.VISIBLE
+                    transmtting = false
+                    GlobalScope.async {connection = requester.run(sock.await(),
+                            when {
+                                leftButton.isChecked -> "l"
+                                rightButton.isChecked -> "r"
+                                redchecked -> "n"
+                                else -> "o"
+                            })
+                    }
+                }
+
+            }
+
+        }
+        cameraButton.setOnClickListener {
+            if(connection){
+                if (!transmtting) {
+                    GlobalScope.async { connection = requester.run(sock.await(), "v") }
+                    cameraButton.visibility = View.GONE
+                    sv.visibility = View.VISIBLE
+                    transmtting = true
+                    GlobalScope.async {connection = requester.run(sock.await(),
+                            when {
+                                leftButton.isChecked -> "l"
+                                rightButton.isChecked -> "r"
+                                redchecked -> "n"
+                                else -> "o"
+                            })
+                    }
+                }
             }
         }
     }
 
     override fun onSaveInstanceState(savedInstanceState: Bundle?) {
-
         savedInstanceState?.putBoolean(TRAMS_STATE, transmtting)
         super.onSaveInstanceState(savedInstanceState)
     }
@@ -235,94 +407,39 @@ class MainActivity : AppCompatActivity(), SensorEventListener, SurfaceHolder.Cal
         }
     }
 
-
-
     override fun onPause() {
         super.onPause()
-
         sensorManager.unregisterListener(this)
         GlobalScope.async { connection = requester.run(sock.await(), "vs1")}
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        requester.start(false)
+        vrec?.interrupt()
         //GlobalScope.async {requester.stop(sock.await())}
         //GlobalScope.async {requester.start(false)}
+        GlobalScope.async { connection = requester.run(sock.await(), "vs2")}
         GlobalScope.async {connection = requester.run(sock.await(), "s")}
     }
 
-    /*override fun onCreateOptionsMenu(menu: Menu?): Boolean {
-        menuInflater.inflate(R.menu.toolbar, menu)
-        this.menu = menu
-        return true
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem?): Boolean {
-        when (item?.itemId) {
-            R.id.bright -> {
-                seekBar.visibility = View.VISIBLE
-            }
-            R.id.connect -> {
-                if(!connection) {
-                    sock = GlobalScope.async {requester.connect()}
-                }
-                GlobalScope.async {connection = requester.run(sock.await(), "c")}
-            }
-        }
-        return super.onOptionsItemSelected(item)
-    }
-
-    override fun onPrepareOptionsMenu(menu: Menu?): Boolean {
-        if (connection) {
-            if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) connButton.setImageResource(R.drawable.ic_wifi)
-            else {
-                invalidateOptionsMenu()
-                menu?.findItem(R.id.connect)?.setIcon(R.drawable.ic_wifi)
-            }
-        } else {
-            if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) connButton.setImageResource(R.drawable.ic_wifi_slash)
-            else {
-                invalidateOptionsMenu()
-                menu?.findItem(R.id.connect)?.setIcon(R.drawable.ic_wifi_slash)
-            }
-        }
-        return super.onPrepareOptionsMenu(menu)
-    }*/
-
-    override fun surfaceCreated(holder: SurfaceHolder) {
-        //Log.d("UDP", "created")
-        mRec = UdpReceiverDecoderThread(holder.surface, 5000)
-        mRec?.start()
-    }
-
-    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        //Log.d("UDP", "surface changed")
-    }
-
-    override fun surfaceDestroyed(holder: SurfaceHolder) {
-        //Log.d("UDP", "surface destroyed")
-        GlobalScope.launch { connection = requester.run(sock.await(), "vs1")}
-
-        mRec?.interrupt()
-        mRec = null
-    }
     override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture?, width: Int, height: Int) {
     }
 
     override fun onSurfaceTextureUpdated(surface: SurfaceTexture?) {
-        //To change body of created functions use File | Settings | File Templates.
     }
 
     override fun onSurfaceTextureDestroyed(surface: SurfaceTexture?): Boolean {
-        mRec?.interrupt()
-        mRec = null
-        return true
+        vrec?.stopReceiver()
+        vrec?.interrupt()
+        surface?.release()
+        return false
     }
 
     override fun onSurfaceTextureAvailable(surface: SurfaceTexture?, width: Int, height: Int) {
         val s = Surface(surface)
-        mRec = UdpReceiverDecoderThread(s, 5000)
-        mRec?.start()
+        vrec = VideoReceiver(s, 5000)
+        vrec?.start()
     }
 
 }
