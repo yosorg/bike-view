@@ -18,8 +18,6 @@ import kotlin.concurrent.thread
 
 
 class Request {
-    var socks: MutableList<Socket> = mutableListOf()
-    //var broacast = true
     lateinit var rsocket: DatagramSocket
 
     fun start(broacast: Boolean): String {
@@ -35,61 +33,63 @@ class Request {
             Log.e("INIT", "Got UDP broadcast from $ipreceived, message: $message")
             //rsocket.close()
             if (message == "BikeView") {
+                //connect(ipreceived)
                 return ipreceived
             }
             //if (ips.size == 2) break
         }
-        Log.e("INIT", "Stop")
-        rsocket.close()
+        Log.e("INIT", "broadcast stop")
+        try{
+            rsocket.close()
+        }catch (e: Exception) {
+            Log.e(TAG, "Exception", e)
+        }
         return ""
     }
 
-    fun connect(ips: MutableList<String>): MutableList<Socket>{
-        Log.e("CONN", "Number of ip ${ips.size}")
-        //if (ips.size == 0) GlobalScope.async { start(true) }
-        ips.forEach {
-            Log.e("CONN", "ip ${it}")
-            socks.add(Socket(it, 8000))
-        }
-        Log.e("CONN", "Number of sockets ${socks.size}")
-        return socks
+    fun connect(ip: String): Socket{
+        Log.e("INIT", "connected")
+        return Socket(ip, 8000)
+
     }
 
-    fun run(sockets: MutableList<Socket>, order: String): Boolean {
+    fun run(socket: Socket, order: String): Boolean {
         var delivered = false
-        sockets.forEach {
-            try {
-                if (it.isClosed) {
-                    Log.e(TAG, "socket"+it.isBound)
-                    return false
-                }
-                else {
-                    it.outputStream.write(order.toByteArray(Charset.defaultCharset()))
-                    Log.e("SEND", "Sent: $order")
-                    var responseString: String?
-                    val bufferReader = BufferedReader(InputStreamReader(it.inputStream))
-                    responseString = bufferReader.readLine()
-                    Log.e("SEND", "Received: $responseString")
-                    delivered = delivered || (responseString != null)
-                    Log.e("SEND", "Delivered: $delivered")
-                }
-
-                //bufferReader.close()
-                //socket.close()
-            }
-            catch (e: UnknownHostException) {
-                Log.e(TAG, "UnknownHostException", e)
-            } catch (e: IOException) {
-                Log.e(TAG, "IOException", e)
-                it.close()
+        try {
+            if (socket.isClosed) {
+                Log.e(TAG, "socket"+socket.isBound)
                 return false
-            } catch (e: Exception) {
-                Log.e(TAG, "Exception", e)
             }
+            else {
+                socket.outputStream.write(order.toByteArray(Charset.defaultCharset()))
+                Log.e("SEND", "Sent: $order")
+                var responseString: String?
+                val bufferReader = BufferedReader(InputStreamReader(socket.inputStream))
+                responseString = bufferReader.readLine()
+                Log.e("SEND", "Received: $responseString")
+                delivered = delivered || (responseString != null)
+                Log.e("SEND", "Delivered: $delivered")
+            }
+
+            //bufferReader.close()
+            //socket.close()
         }
+        catch (e: UnknownHostException) {
+            Log.e(TAG, "UnknownHostException", e)
+        } catch (e: IOException) {
+            Log.e(TAG, "IOException", e)
+            socket.close()
+            return false
+        } catch (e: Exception) {
+            Log.e(TAG, "Exception", e)
+        }
+
         Log.e("SEND", "Delivered: $delivered")
         return delivered
 
+    }
+    fun isconnected(socket: Socket): Boolean{
+        return socket.isConnected
     }
 
     fun setbroad(broad: Boolean){
